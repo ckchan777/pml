@@ -1,0 +1,125 @@
+---
+title: "Practical Machine Learning"
+author: "Ckchan"
+date: "Saturday, August 22, 2015"
+output: html_document
+---
+
+##Introduction
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The training data consists of accelerometer data and a label - Classe, identifying the quality of the activity the participant was doing . The testing data consists of accelerometer data without the Classe label. Thus the goal is to predict the labels for the test set observations.
+
+##Data Preprocessing
+
+```{r}
+library(caret)
+ptrain <- read.csv("pml-training.csv")
+ptest <- read.csv("pml-testing.csv")
+```
+
+In order to estimate the out-of-sample error, do a random split of the full training data ptrain into a smaller training set, ptrain1 and a validation set, ptrain2
+
+```{r}
+set.seed(777)
+inTrain <- createDataPartition(y=ptrain$classe, p=0.7, list=F)
+ptrain1 <- ptrain[inTrain, ]
+ptrain2 <- ptrain[-inTrain, ]
+```
+
+Next, reduce the number of features by removing: 
+1. variables that are almost always NA 
+2. variables with nearly zero variance
+3. variables that do not make sense for prediction
+
+```{r}
+#remove variables that are almost always NA
+mostlyNA <- sapply(ptrain1, function(x) mean(is.na(x))) > 0.95
+ptrain1 <- ptrain1[, mostlyNA==F]
+ptrain2 <- ptrain2[, mostlyNA==F]
+
+#remove variables with nearly zero variance
+zerovar <- nearZeroVar(ptrain1)
+ptrain1 <- ptrain1[, -zerovar]
+ptrain2 <- ptrain2[, -zerovar]
+
+#remove variables that don't make much sense for prediction which are column X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, ie, the first 5 variables
+ptrain1 <- ptrain1[, -(1:5)]
+ptrain2 <- ptrain2[, -(1:5)]
+```
+
+##Model Building
+Start with a Random Forest model, to see if it would have acceptable performance. Fit the model on ptrain1, and instruct the "train" function to use 5-fold cross validation.
+
+```{r}
+# instruct train to use 5-fold cross validation 
+fitControl <- trainControl(method="cv", number=5, verboseIter=F)
+
+# fit model on ptrain1
+fit <- train(classe ~ ., data=ptrain1, method="rf", trControl=fitControl)
+
+# print final model to see chosen tuning parameters 
+fit$finalModel
+
+```
+
+##Model Selection & Evaluation
+
+The fitted model is used to predict the label, Classe in ptrain2. The confusion matrix compares the predicted vs the actual labels
+
+```{r}
+#use model to predict classe in validation set ptrain2
+pred1 <- predict(fit, newdata=ptrain2)
+
+#display confusion matrix to get estimate of out-of-sample error
+confusionMatrix(ptrain2$classe, pred1)
+
+```
+The accuracy is 99.8%, so the predicted accuracy for the out-of-sample error is 0.2%.
+
+This is an excellent result, so instead of using other algorithms, Random Forests will be used for prediction on the test set.
+
+##Retraining the selected model
+Before carrying out predictions on the test set, it is important to train the model on the full training set - ptrain, instead of a model trained on the reduced training set - ptrain1 in order to obtain the most accurate predictions. Thus, all the steps that was carry out in the preprocessing stage will be done on ptrain and ptest this time round
+
+```{r}
+#remove variables that are almost always NA
+mostlyNA <- sapply(ptrain, function(x) mean(is.na(x))) > 0.95
+ptrain <- ptrain[, mostlyNA==F]
+ptest <- ptest[, mostlyNA==F]
+
+#remove variables with nearly zero variance
+zerovar  <- nearZeroVar(ptrain)
+ptrain <- ptrain[, -zerovar ]
+ptest <- ptest[, -zerovar ]
+
+#remove variables that don't make much sense for prediction which are column X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, ie, the first 5 variables
+ptrain <- ptrain[, -(1:5)]
+ptest <- ptest[, -(1:5)]
+
+# refit model using full training set - ptrain
+fitControl <- trainControl(method="cv", number=5, verboseIter=F)
+fit <- train(classe ~ ., data=ptrain, method="rf", trControl=fitControl)
+```
+
+##Making predictions on the test set given
+
+Use the model fit on ptrain to predict the label for the observations in ptest and write those predictions to individual files
+
+```{r}
+# predict on test set
+preds <- predict(fit, newdata=ptest)
+
+# convert predictions to character vector
+preds <- as.character(preds)
+
+# create function to write predictions to files
+pml_write_files <- function(x) {
+    n <- length(x)
+    for(i in 1:n) {
+        filename <- paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+    }
+}
+
+# create prediction files to submit
+pml_write_files(preds)
+```
